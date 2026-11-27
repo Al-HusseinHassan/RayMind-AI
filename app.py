@@ -4,6 +4,8 @@ import tempfile
 import os
 from chatbot.agents.llm_response_generator.generator import final_generation
 
+os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+
 st.set_page_config(
     page_title="RayMind AI",
     page_icon="🫁",

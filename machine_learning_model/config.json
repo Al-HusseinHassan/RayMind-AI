@@ -1,0 +1,31 @@
+{
+  "class_names_file": "class_names.json",
+  "image_size": [
+    224,
+    224
+  ],
+  "channels": 3,
+  "color_mode": "rgb",
+  "interpolation": "bilinear",
+  "num_classes": 4,
+  "modalities": {
+    "CT": {
+      "model_file": "best_model_CT.keras",
+      "approach": "VGG19 (TL)",
+      "preprocessing": "vgg19",
+      "test_accuracy": 0.92
+    },
+    "CXR": {
+      "model_file": "best_model_CXR.keras",
+      "approach": "VGG19 (TL)",
+      "preprocessing": "vgg19",
+      "test_accuracy": 0.935
+    },
+    "Cough sound": {
+      "model_file": "best_model_Cough_sound.keras",
+      "approach": "CNN (scratch)",
+      "preprocessing": "rescale_0_1",
+      "test_accuracy": 0.835
+    }
+  }
+}

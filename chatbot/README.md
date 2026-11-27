@@ -2,69 +2,89 @@
 
 ## Overview
 
-The chatbot is designed to provide users with informative, context-aware responses to questions related to respiratory diseases.
+RayMind AI provides an interactive medical chatbot designed to answer questions related to respiratory diseases.
 
-It uses **Retrieval-Augmented Generation (RAG)** to retrieve relevant information from a local medical knowledge base and provide it to an LLM for response generation.
+It uses **Retrieval-Augmented Generation (RAG)** to retrieve relevant information from a local medical knowledge base and provide it to an LLM for grounded response generation.
 
-The chatbot works alongside the ML prediction component, which can provide additional context about the user's uploaded medical data.
+The chatbot is also integrated with the machine learning prediction component, allowing it to use predictions from uploaded medical images as additional context when available.
 
 ## Architecture
 
 The chatbot consists of three main components:
 
 1. **Query Analyzer (LLM 1)**
-2. **Retriever**
+2. **Trigger (Python Component)**
 3. **Response Generator (LLM 2)**
+
+The Retriever is part of the knowledge module and is called by the Trigger when medical knowledge retrieval is required.
 
 ### Workflow
 
 ```text
-             User Input
-                  |
-                  v
-          +----------------+
-          | Query Analyzer |
-          |    (LLM 1)     |
-          +----------------+
-                  |
-          +-------+-------+
-          |               |
-          v               v
-      Query Content   Metadata
-          |               |
-          +-------+-------+
-                  |
-                  v
-          +----------------+
-          |    Retriever   |
-          |    ChromaDB    |
-          +----------------+
-                  |
-                  v
-          Retrieved Documents
-                  |
-                  v
-          +----------------+
-          |    Response    |
-          |   Generator    |
-          |    (LLM 2)     |
-          +----------------+
-                  |
-                  v
-           Final Response
+                    User Input
+                  (Text + Image)
+                        |
+                        v
+              +-------------------+
+              |   Query Analyzer  |
+              |      (LLM 1)      |
+              +-------------------+
+                        |
+              +---------+---------+
+              |                   |
+              v                   v
+         Query Content        Metadata
+                              - Diseases
+                              - Sections
+                              - Modality
+              |                   |
+              +---------+---------+
+                        |
+                        v
+              +-------------------+
+              |      Trigger      |
+              |  Python Component |
+              +-------------------+
+                        |
+              +---------+---------+
+              |                   |
+              v                   v
+         Knowledge             ML Prediction
+         Retrieval              (If Needed)
+              |                   |
+              v                   v
+        +-----------+       Prediction Result
+        | Retriever |
+        | ChromaDB  |
+        +-----------+
+              |
+              v
+       Retrieved Documents
+              |
+              +-------------------+
+                                  |
+                                  v
+                       +-------------------+
+                       | Response Generator|
+                       |      (LLM 2)      |
+                       +-------------------+
+                                  |
+                                  v
+                            Final Response
 ```
 
 ## 1. Query Analyzer
 
 The Query Analyzer is the first LLM component.
 
-Its responsibility is to understand the user's question and prepare the information required for retrieval.
+Its responsibility is to understand the user's question and extract the information required to determine the appropriate retrieval strategy.
 
 It produces:
 
-- **Query Content:** The original or transformed query used for semantic search.
+- **Query Content:** The original or refined query used for semantic search.
 - **Disease Metadata:** Identifies relevant diseases when applicable.
-- **Section Metadata:** Identifies relevant knowledge-base sections when applicable.
+- **Section Metadata:** Identifies relevant knowledge-base sections, such as symptoms, causes, diagnosis, or treatment.
+- **Modality Metadata:** Identifies the relevant medical imaging modality when applicable, such as CT or CXR.
 
 Example:
 
@@ -74,69 +94,99 @@ Example:
 
 **Expected Output:**
 
-```json
+```python
 {
     "query": "What are the common symptoms of pneumonia?",
-    "disease": ["pneumonia"],
-    "section": ["symptoms"]
+    "diseases": ["pneumonia"],
+    "sections": ["symptoms"],
+    "modality": None
 }
 ```
 
-The analyzer must use only valid metadata values defined in the knowledge base. If the question is broad or ambiguous, it should avoid unnecessary metadata filtering.
+The analyzer must use only valid metadata values defined in the knowledge base.
 
-## 2. Retriever
+For broad or ambiguous questions, it should avoid unnecessary metadata filtering to prevent excluding relevant information.
 
-The Retriever uses the query and metadata generated by the Query Analyzer to search the local vector database.
+## 2. Trigger
+
+The Trigger is a Python component responsible for coordinating the chatbot workflow.
+
+It receives the original user query, the extracted metadata, and the uploaded image path when available.
 
 **Responsibilities:**
 
-- Convert the query into an embedding.
+- Determine which operations are required to handle the user's request.
+- Invoke the Retriever when relevant medical knowledge is needed.
+- Execute the machine learning prediction workflow when an image needs classification.
+- Collect the retrieved documents and prediction results.
+- Prepare the contextual information for the Response Generator.
+
+The Trigger acts as the connection between the chatbot's knowledge retrieval system and the machine learning prediction component.
+
+## 3. Retriever
+
+The Retriever searches the local ChromaDB vector database using the query and metadata generated by the Query Analyzer.
+
+**Responsibilities:**
+
+- Convert the query into an embedding using the configured Hugging Face embedding model.
 - Perform similarity search using ChromaDB.
 - Apply metadata filters when appropriate.
-- Return the most relevant document chunks.
+- Retrieve the most relevant document chunks.
 
-The retrieved documents include their associated metadata, such as:
+The retrieved documents preserve their associated metadata, such as:
 
 - Disease
 - Section
+- Modality
 - Source filename
 - Page number
 
-The Retriever should not automatically restrict results to the disease predicted by the ML model. The user's question determines what information is relevant.
+The Retriever should not automatically restrict results to the disease predicted by the ML model. The user's question and its extracted metadata determine which information is relevant.
 
-## 3. Response Generator
+## 4. Response Generator
 
 The Response Generator is the second LLM component.
 
-It receives the information needed to generate the final response.
+It receives the contextual information collected by the Trigger and generates the final response.
 
 **Inputs:**
 
 - Original user question
-- Retrieved documents
-- ML prediction and confidence, when available
-- Conversation history, when relevant
+- Retrieved medical documents, when available
+- ML prediction and confidence score, when available
+- Uploaded medical image, when relevant
+- Conversation history
 
 **Responsibilities:**
 
-- Understand the user's question.
-- Generate a clear, natural-language response.
+- Understand the user's question and conversational context.
+- Generate clear, natural-language responses.
 - Ground answers in retrieved medical knowledge.
-- Include references to the retrieved sources.
+- Incorporate ML prediction results when available.
+- Include references to retrieved sources.
 - Acknowledge when the available information is insufficient.
+
+The response generator maintains conversational context to support follow-up questions and more natural interactions.
 
 ## Knowledge Base
 
-The chatbot uses a local medical knowledge base containing PDF documents organized by disease.
+The chatbot uses a local medical knowledge base containing PDF documents organized around respiratory diseases and related medical topics.
 
-Current supported categories:
+Current supported disease categories:
 
 - Healthy
 - Lung Cancer
 - Pneumonia
 - COVID-19
 
-Documents are loaded, split into smaller chunks, converted into embeddings, and stored in ChromaDB.
+Documents are processed through the following pipeline:
+
+1. **Document Loading:** Load medical information from PDF files.
+2. **Text Splitting:** Divide documents into smaller chunks.
+3. **Embedding Generation:** Convert text chunks into numerical vector representations.
+4. **Vector Storage:** Store embeddings and metadata in ChromaDB.
+5. **Retrieval:** Search for relevant chunks using semantic similarity and metadata filtering.
 
 Each document chunk preserves metadata to support more accurate retrieval.
 
@@ -146,6 +196,7 @@ Example metadata:
 {
     "disease": "pneumonia",
     "section": "symptoms",
+    "modality": "CXR",
     "source": "symptoms.pdf",
     "page": 1
 }
@@ -153,10 +204,19 @@ Example metadata:
 
 ## Technologies
 
-| Component       | Technology                             |
-| --------------- | -------------------------------------- |
-| LLM integration | LangChain                              |
-| Embedding model | Hugging Face Sentence Transformers     |
-| Vector database | ChromaDB                               |
-| Document format | PDF                                    |
-| Retrieval       | Similarity Search + Metadata Filtering |
+| Component               | Technology                             |
+| ----------------------- | -------------------------------------- |
+| LLM integration         | LangChain                              |
+| LLM models              | Google Gemini                          |
+| Embedding model         | Hugging Face Sentence Transformers     |
+| Vector database         | ChromaDB                               |
+| Document format         | PDF                                    |
+| Retrieval               | Similarity Search + Metadata Filtering |
+| Workflow coordination   | Python                                 |
+| Conversation management | LangGraph                              |
+
+## Important Notes
+
+- The chatbot provides educational medical information and is not a substitute for professional medical advice.
+- ML predictions are model-generated estimates, not confirmed medical diagnoses.
+- Responses depend on the quality and coverage of the available medical knowledge base.

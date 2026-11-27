@@ -2,43 +2,49 @@
 
 ## Overview
 
-The Query Analyzer is the first LLM component in the chatbot's RAG pipeline.
+The Query Analyzer is the first LLM component in RayMind AI's chatbot workflow.
 
-Its primary responsibility is to understand the user's question, extract relevant metadata, and prepare the query for the retrieval process.
+Its primary responsibility is to understand the user's question, extract relevant metadata, and prepare the information required by the retrieval process.
 
-It acts as an intelligent preprocessing component between the user and the Retriever.
+It acts as an intelligent preprocessing component between the user and the Trigger, helping the system determine which medical knowledge is relevant to the request.
+
+When an image is provided, the analyzer can also identify its imaging modality to guide the subsequent workflow.
 
 ## Architecture
 
 ```text
-             User Input
-                  |
-                  v
-          +----------------+
-          | Query Analyzer |
-          |     Gemini     |
-          +----------------+
-                  |
-          +-------+-------+
-          |               |
-          v               v
-      Query Content   Metadata
-          |               |
-          +-------+-------+
-                  |
-                  v
-              Retriever
+                User Input
+             (Query + Optional Image)
+                      |
+                      v
+             +------------------+
+             |  Query Analyzer  |
+             |       LLM        |
+             +------------------+
+                      |
+             +--------+--------+
+             |                 |
+             v                 v
+        Query Content       Metadata
+                            - Diseases
+                            - Sections
+                            - Modality
+             |                 |
+             +--------+--------+
+                      |
+                      v
+                   Trigger
 ```
 
 ## Model
 
 **Provider:** Google
 
-**Model:** Gemini 3.5 Flash-Lite
+**Model:** Google Gemini
 
-**Model ID:** `gemini-3.5-flash-lite`
+The model is used to understand natural-language questions and generate structured metadata for the chatbot workflow.
 
-The model is selected for its low latency, cost efficiency, multimodal capabilities, and structured output support.
+Its capabilities support query understanding and structured information extraction.
 
 Official documentation: https://ai.google.dev/gemini-api/docs/models
 
@@ -46,53 +52,52 @@ Official documentation: https://ai.google.dev/gemini-api/docs/models
 
 The Query Analyzer receives:
 
-| Parameter              | Description                                  |
-| ---------------------- | -------------------------------------------- |
-| `user_query`           | Original question submitted by the user      |
-| `prediction`           | ML model prediction, when available          |
-| `confidence`           | ML prediction confidence, when available     |
-| `conversation_history` | Previous conversation context, when relevant |
+| Parameter    | Description                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------ |
+| `user_query` | Original question submitted by the user.                                                         |
+| `image_path` | Optional path to an uploaded medical image, used when image modality identification is required. |
+
+Example:
+
+```python
+query = "What are the common symptoms of pneumonia?"
+image_path = None
+```
+
+For image-related requests, an image path can also be provided.
+
+## Output
+
+The Query Analyzer generates structured metadata containing:
+
+| Field      | Description                                   |
+| ---------- | --------------------------------------------- |
+| `sections` | Relevant medical knowledge-base sections.     |
+| `diseases` | Relevant disease categories.                  |
+| `modality` | Identified imaging modality, when applicable. |
 
 Example:
 
 ```python
 {
-    "user_query": "What are the common symptoms of pneumonia?",
-    "prediction": "pneumonia",
-    "confidence": 0.94
+    "sections": ["symptoms"],
+    "diseases": ["pneumonia"],
+    "modality": None
 }
 ```
 
-## Output
-
-The Query Analyzer generates structured information containing:
-
-| Field     | Description                               |
-| --------- | ----------------------------------------- |
-| `query`   | Query content used for semantic retrieval |
-| `disease` | Relevant disease metadata                 |
-| `section` | Relevant document section metadata        |
-
-Example:
-
-```json
-{
-    "query": "What are the common symptoms of pneumonia?",
-    "disease": ["pneumonia"],
-    "section": ["symptoms"]
-}
-```
+For an image-related request, the modality may be identified as `CT`, `CXR`, or another supported value.
 
 ### Supported Metadata
 
-**Disease:**
+**Diseases:**
 
 - `healthy`
 - `lung_cancer`
 - `pneumonia`
 - `covid`
 
-**Section:**
+**Sections:**
 
 - `overview`
 - `symptoms`
@@ -101,38 +106,45 @@ Example:
 - `treatment`
 - `normal_imaging`
 
-The analyzer must only return metadata values that exist in the knowledge base.
+**Imaging Modalities:**
+
+- `CT`
+- `CXR`
+
+The analyzer must use valid metadata values supported by the knowledge base and prediction workflow.
 
 ## Responsibilities
 
 1. Understand the user's question and identify its intent.
 2. Identify relevant diseases and document sections.
-3. Generate or refine the query for semantic retrieval.
-4. Produce structured output for the Retriever.
-5. Use conversation history to resolve references when necessary.
+3. Identify the imaging modality when an image is provided.
+4. Generate structured metadata for the subsequent workflow.
+5. Support questions involving multiple diseases or medical topics.
 6. Avoid unnecessary metadata filtering when the question is broad or ambiguous.
 
 ## Important Considerations
 
 - The original user question must be preserved for the Response Generator.
-- ML predictions provide additional context but must not override the user's question.
+- ML predictions must not override the user's actual question.
 - The analyzer must not invent disease or section metadata.
 - Multiple diseases may be selected for comparison questions.
-- If the relevant metadata cannot be determined confidently, retrieval should proceed without that filter.
-- Image processing is not part of the initial Query Analyzer workflow. Its initial responsibility is text-based query analysis.
+- If relevant metadata cannot be determined confidently, the corresponding filter should be omitted.
+- Modality identification helps guide the workflow but does not replace validation of the actual uploaded image.
+- The Query Analyzer does not execute ML predictions or retrieve documents; these operations are handled by the Trigger.
 
 ## Directory Structure
 
 ```text
-query_analyzer/
-├── README.md
+llm_query_analyzer/
 ├── model.py
 ├── prompt.py
-└── analyzer.py
+├── schema.py
+└── agent.py
 ```
 
-| File          | Responsibility                                   |
-| ------------- | ------------------------------------------------ |
-| `model.py`    | Initialize and configure the Gemini model.       |
-| `prompt.py`   | Define the Query Analyzer instructions.          |
-| `analyzer.py` | Analyze user input and return structured output. |
+| File        | Responsibility                                                                 |
+| ----------- | ------------------------------------------------------------------------------ |
+| `model.py`  | Initializes and configures the Gemini model.                                   |
+| `prompt.py` | Defines the instructions that guide query analysis.                            |
+| `schema.py` | Defines the structured output schema used to validate the analyzer's response. |
+| `agent.py`  | Builds and executes the Query Analyzer agent and returns structured metadata.  |

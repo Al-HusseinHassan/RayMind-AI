@@ -6,98 +6,110 @@ The Agent component is responsible for understanding user queries, coordinating 
 
 It consists of three main components:
 
-1. **Generator Agent** – Receives user input, coordinates the workflow, and generates the final response.
+1. **Response Generator Agent** – Coordinates the workflow and generates the final response.
 2. **Query Analyzer Agent** – Analyzes the user's query and optional medical image to generate structured metadata.
-3. **Trigger** – A Python script that executes the required operations, including ML prediction and document retrieval.
+3. **Trigger** – A Python component that executes the required operations, including ML prediction and document retrieval.
 
-A shared memory system maintains the conversation state and intermediate results across interactions.
+LangGraph conversation state management maintains conversational context across interactions using a unique `thread_id`.
 
 ## Architecture
 
 ```text
                     User Input
-              (Query + Optional Input)
+              (Query + Optional Image)
                        |
                        v
-                 Generator Agent
-                 - Receive user input
-                 - Coordinate workflow
+              Response Generator
+                  (LLM 2)
                        |
                        v
-               Query Analyzer Agent
-                - Understand query
-                - Generate metadata
-                - Identify input modality
+                Query Analyzer
+                  (LLM 1)
                        |
                        v
-                    Trigger.py
-                  (Python Script)
-                - Validate input
-                - Run ML prediction
-                - Retrieve relevant documents
-                - Update shared state
+                 Structured
+                   Metadata
                        |
                        v
-                 Generator Agent
-                - Read conversation history
-                - Use retrieved documents
-                - Use ML prediction results
-                - Generate final response
-                - Save response to memory
+                    Trigger
+                (Python Component)
+                       |
+              +--------+--------+
+              |                 |
+              v                 v
+         ML Prediction     Document Retrieval
+         (If Needed)        (ChromaDB)
+              |                 |
+              +--------+--------+
                        |
                        v
-                 Final Response
+               Execution Results
+                       |
+                       v
+              Response Generator
+                  (LLM 2)
+                       |
+              +--------+--------+
+              |                 |
+              v                 v
+        Conversation       Final Response
+           State
 ```
 
-## 1. Generator Agent
+## 1. Response Generator Agent
 
-The Generator is the main entry point of the agent component and coordinates the overall workflow.
+The Response Generator is the main component responsible for coordinating the chatbot workflow and generating the final response.
 
-It receives the user's query and optional medical input, invokes the Query Analyzer, and passes the analyzer's output to the Trigger.
+It receives the user's query and optional medical image, invokes the Query Analyzer, and passes the analyzer's output to the Trigger.
 
-After the Trigger completes the required operations, the Generator uses the returned results and conversation context to generate the final response.
+After the Trigger completes the required operations, the Response Generator uses the returned results and conversation context to generate the final response.
 
 **Responsibilities:**
 
-- Receive the original user query and optional medical input.
+- Receive the original user query and optional medical image.
 - Invoke the Query Analyzer Agent.
-- Pass the Query Analyzer's output and original input to the Trigger.
-- Receive the retrieved documents and ML prediction results.
-- Access conversation history and relevant memory.
-- Generate the final response using the available context.
-- Save the generated response into shared memory.
+- Pass the original input and extracted metadata to the Trigger.
+- Receive retrieved documents and ML prediction results.
+- Access conversation history through LangGraph state management.
+- Generate a context-aware response using the available information.
+- Maintain conversation context across multiple interactions.
 
 **Inputs:**
 
 - User query.
-- Optional medical image or input.
-- Conversation history.
+- Optional medical image.
+- Conversation state.
 
 **Outputs:**
 
 - Final context-aware response.
 
-## 2. Query Analyzer Agent
-
-The Query Analyzer uses an LLM to understand the user's request and convert it into structured metadata.
-
-It receives the original query and, when applicable, an uploaded medical image to identify its modality.
-
-**Responsibilities:**
-
-- Understand the user's query.
-- Identify relevant diseases and knowledge sections.
-- Identify the input modality when applicable.
-- Generate structured output using predefined values.
-
-The Query Analyzer does not execute ML predictions or retrieve documents. It only analyzes the input and provides metadata to guide the Trigger.
-
-**Model:** Google Gemini 3.5 Flash-Lite
-
 **Technologies:**
 
 - LangChain
 - LangGraph
+- Google Gemini
+
+## 2. Query Analyzer Agent
+
+The Query Analyzer uses an LLM to understand the user's request and convert it into structured metadata.
+
+It receives the original query and, when applicable, an uploaded medical image to identify its imaging modality.
+
+**Responsibilities:**
+
+- Understand the user's query.
+- Identify relevant diseases and knowledge-base sections.
+- Identify the imaging modality when applicable.
+- Generate structured metadata using predefined values.
+- Avoid unnecessary filtering when the query does not provide sufficient information.
+
+The Query Analyzer does not execute ML predictions or retrieve documents. It only analyzes the input and provides metadata to guide the Trigger.
+
+**Technologies:**
+
+- LangChain
+- Google Gemini
 - Pydantic
 
 ### Example Output
@@ -110,110 +122,109 @@ The Query Analyzer does not execute ML predictions or retrieve documents. It onl
 }
 ```
 
-The metadata is returned to the Generator, which passes it to the Trigger along with the original user input.
+The structured metadata is passed to the Trigger along with the original user input.
 
 ## 3. Trigger
 
-The Trigger is a normal Python script, not an LLM agent.
+The Trigger is a normal Python component, not an LLM agent.
 
-It receives the original user input and the metadata generated by the Query Analyzer through the Generator, then executes the required operations.
+It receives the original user input and the metadata generated by the Query Analyzer through the Response Generator, then executes the required operations.
 
 **Responsibilities:**
 
 - Validate the uploaded input and its modality.
-- Execute the appropriate ML prediction function when a new supported input is provided.
+- Execute the appropriate ML prediction function when a supported medical image is provided.
 - Retrieve relevant document chunks from the RAG knowledge base.
 - Apply metadata filters to improve retrieval relevance.
-- Return prediction results and retrieved documents to the Generator.
-- Update shared memory with intermediate results.
+- Collect prediction results and retrieved documents.
+- Return the execution results to the Response Generator.
 
-The Trigger acts as the connection between the AI agents, the ML model, and the RAG knowledge base.
+The Trigger acts as the connection between the AI agents, the ML prediction system, and the RAG knowledge base.
 
 **Important:** The Trigger must validate the actual uploaded input rather than relying only on the Query Analyzer's output.
 
-## 4. Memory
+## 4. Conversation State and Memory
 
-Memory is shared across the Generator, Query Analyzer, and Trigger.
+The system uses LangGraph state management to maintain conversational context across multiple interactions.
 
-It maintains the conversation state and stores intermediate results so that different components can access the information they need.
+A unique `thread_id` identifies each conversation, allowing the checkpointer to retrieve the corresponding state when the user sends a new message.
 
 **Responsibilities:**
 
 - Maintain conversation history.
-- Store the original user query.
-- Store Query Analyzer metadata.
-- Store references to uploaded inputs.
-- Store ML prediction results.
-- Store retrieved document chunks.
-- Store generated responses.
-- Preserve context across multiple conversation turns.
+- Preserve context across multiple interactions.
+- Associate messages with the correct conversation.
+- Make previous conversational information available to the Response Generator.
 
-### State Structure
+### State Management
 
-A conceptual representation of the shared state:
+The Response Generator uses a LangGraph checkpointer to maintain conversation state.
 
-```python
-class ChatbotState(TypedDict):
-    user_query: str
-    input_reference: Any
-    metadata: dict
-    prediction: dict
-    retrieved_documents: list
-    conversation_history: list
-    response: str
-```
+The implementation uses:
 
-**Persistence:** LangGraph Checkpointer
+- **InMemorySaver:** Stores conversation checkpoints in memory during the application's runtime.
+- **thread_id:** Identifies and separates individual conversations.
 
-A `thread_id` is used to maintain separate conversation states across interactions.
+The conversation state is managed through LangGraph rather than requiring every component to maintain a separate memory system.
 
-Uploaded files should be stored as file references rather than repeatedly storing their binary contents in persistent conversation memory.
+**Persistence Consideration:** `InMemorySaver` stores checkpoints in memory. Conversation state is therefore not guaranteed to survive application restarts.
 
 ## Directory Structure
 
 ```text
-agent/
+chatbot/
 │
-├── README.md
+├── agents/
+│   │
+│   ├── llm_query_analyzer/
+│   │   ├── agent.py
+│   │   ├── model.py
+│   │   ├── prompt.py
+│   │   └── schema.py
+│   │
+│   ├── trigger/
+│   │   └── trigger.py
+│   │
+│   └── llm_response_generator/
+│       ├── agent.py
+│       ├── model.py
+│       ├── prompt.py
+│       ├── generator.py
+│       └── chat_history.py
 │
-├── query_analyzer/
-│   ├── model.py
-│   ├── schema.py
-│   ├── prompts.py
-│   └── agent.py
-│
-├── trigger.py
-│
-├── generator/
-│   ├── model.py
-│   ├── prompt.py
-│   └── agent.py
-│
-└── memory/
-    ├── state.py
-    └── checkpointer.py
+└── knowledge/
+    ├── chroma_db/
+    ├── documents/
+    ├── document_loader.py
+    ├── embeddings.py
+    ├── text_splitter.py
+    ├── vector_store.py
+    └── retriever.py
 ```
+
+_Note: The directory structure above highlights the main components; additional supporting files may exist in individual directories._
 
 ## Technologies
 
-| Technology         | Purpose                                        |
-| ------------------ | ---------------------------------------------- |
-| Python             | Main implementation language                   |
-| Google Gemini      | LLM for query analysis and response generation |
-| LangChain          | LLM integration and model interaction          |
-| LangGraph          | Agent orchestration and state management       |
-| Pydantic           | Structured output validation                   |
-| ChromaDB           | Vector database used by the RAG knowledge base |
-| TensorFlow / Keras | ML prediction model integration                |
+| Technology         | Purpose                                                        |
+| ------------------ | -------------------------------------------------------------- |
+| Python             | Main implementation language                                   |
+| Google Gemini      | LLM for query analysis and response generation                 |
+| LangChain          | LLM integration and model interaction                          |
+| LangGraph          | Agent workflow orchestration and conversation state management |
+| Pydantic           | Structured output validation                                   |
+| ChromaDB           | Vector database used by the RAG knowledge base                 |
+| Hugging Face       | Embedding model integration                                    |
+| TensorFlow / Keras | Medical image classification and prediction                    |
 
 ## Important Considerations
 
-- The Generator is responsible for coordinating the workflow and generating the final response.
+- The Response Generator coordinates the workflow and generates the final response.
 - The Query Analyzer generates metadata; it does not execute ML predictions or document retrieval.
 - The Trigger is deterministic Python logic, not an autonomous agent.
-- The Generator uses retrieved documents as its medical knowledge context.
-- ML predictions must be associated with the correct uploaded input and conversation turn.
+- The Response Generator uses retrieved documents as supporting medical knowledge.
+- ML predictions must be associated with the correct uploaded image and conversation turn.
 - A previous prediction must not be mistaken for a new prediction.
-- The system should distinguish between model predictions and confirmed medical diagnoses.
-- The agents should communicate through a clearly defined shared state.
+- Model predictions are estimates, not confirmed medical diagnoses.
+- Conversation state is maintained using LangGraph checkpoints and unique thread identifiers.
 - The system should acknowledge when retrieved evidence is insufficient to answer a question.
